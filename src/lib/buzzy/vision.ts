@@ -271,8 +271,8 @@ async function lookOnce(
 ): Promise<PictureLook | LookFailure> {
   const label = pick.label || "";
   const fail = (code: string, error: string): LookFailure => ({ id: pick.id, label, why: pick.why, code, error });
-  // This picture itself can't be looked at (gone, not a picture, empty, too big, unreadable):
-  // noted like a failed look, so it never keeps a newer picture out of the six places.
+  // This picture itself can't be looked at (gone, not a picture, empty, too big): noted like a
+  // failed look, so it never keeps a newer picture out of the six places.
   const unlookable = (code: string, error: string): LookFailure => { noteLookFailed(userId, pick.id, true); return fail(code, error); };
   const question = opts.question ? String(opts.question) : null;
   let kept: { note: string; model: string } | null = null;
@@ -298,7 +298,7 @@ async function lookOnce(
       SELECT body, content_type FROM buzzy_assets WHERE user_id = ${userId} AND id = ${pick.id} LIMIT 1`;
     row = rows[0];
   } catch {
-    return unlookable("unreadable", "the picture could not be read");
+    return fail("unreadable", "the picture could not be read");   // the database, not the picture: not noted
   }
   if (!row) return unlookable("not_found", "no such picture in their Library");
   const type = String(row.content_type || "").toLowerCase();
@@ -437,14 +437,20 @@ export async function lookAtPictures(
   const kept = new Set<number>();
   if (!opts.cachedOnly && rest.length > 1) {
     const candidates = rest.slice(0, KNOWN_CHECK_MAX);
-    // Each answer is used as it comes; one that is slow stays "unknown" (no reordering for it).
-    const seen: Array<"kept" | "new" | "unknown"> = candidates.map(() => "unknown");
-    const checks = candidates.map((p, i) =>
-      sql`SELECT 1 AS one FROM buzzy_picture_looks WHERE user_id = ${userId} AND asset_id = ${p.id} LIMIT 1`
-        .then((r) => { seen[i] = r.length > 0 ? "kept" : "new"; }, () => { /* unknown */ }));
-    await within(Promise.all(checks), Math.min(KNOWN_CHECK_MS, budget));
-    candidates.forEach((p, i) => { if (seen[i] === "kept") kept.add(p.id); });
-    const fresh = candidates.filter((p, i) => seen[i] === "new" && ON_THE_BOARD.has(p.why) && p.why !== "pointed");
+    // One read for all of them (never one per picture: on a single connection those would
+    // queue ahead of the looks themselves). Slow or failed: nothing is known, nothing reordered.
+    let keptIds: Set<number> | null = null;
+    const marks = candidates.map((_, i) => "$" + String(i + 2)).join(", ");
+    await within(
+      sql.query<{ asset_id: number | string }>(
+        `SELECT asset_id FROM buzzy_picture_looks WHERE user_id = $1 AND asset_id IN (${marks})`,
+        [userId, ...candidates.map((p) => p.id)],
+      ).then((rows) => { keptIds = new Set(rows.map((r) => Number(r.asset_id))); }, () => { /* unknown */ }),
+      Math.min(KNOWN_CHECK_MS, budget),
+    );
+    const known = keptIds as Set<number> | null;
+    if (known) candidates.forEach((p) => { if (known.has(p.id)) kept.add(p.id); });
+    const fresh = known ? candidates.filter((p) => !known.has(p.id) && ON_THE_BOARD.has(p.why) && p.why !== "pointed") : [];
     if (fresh.length) {
       const lead = rest.filter((p) => p.why === "pointed" || p.why === "attached");
       const failing = fresh.filter((p) => lookFailedRecently(userId, p.id));
@@ -549,9 +555,19 @@ export function picturesSeenBlock(
     const share = i === 0
       ? Math.max(Math.floor(room / 2), room - others * 240)
       : Math.min(room, Math.max(240, Math.floor(room / (others + 1)) - 1));
-    const hard = line.slice(0, Math.max(1, share - 1));
-    const atWord = hard.replace(/\s+\S*$/, "");
-    const cut = line.length > share ? (atWord.length >= hard.length * 0.8 ? atWord : hard) + "…" : line;
+    // Too long: the description gives way, never the answer to their question (cut last).
+    const trim = (text: string, n: number): string => {
+      if (text.length <= n) return text;
+      const hard = text.slice(0, Math.max(0, n - 1));
+      const atWord = hard.replace(/\s+\S*$/, "");
+      return (atWord.length >= hard.length * 0.8 ? atWord : hard) + "…";
+    };
+    const fixed = head.length + 1 + answer.length;
+    const cut = line.length <= share
+      ? line
+      : share - fixed >= 60
+        ? `${head} ${trim(body, share - fixed)}${answer}`
+        : trim(line, share);
     lines.push(cut);
     used += cut.length + 1;
   });

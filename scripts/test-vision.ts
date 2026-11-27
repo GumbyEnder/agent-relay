@@ -56,7 +56,22 @@ function fakeSql(assets: Asset[], looks: Map<string, { note: string; model: stri
     }
     return Promise.resolve([]);
   }) as unknown as Parameters<typeof V.lookAtPicture>[0];
+  (sql as unknown as { query: (text: string, params: unknown[]) => Promise<unknown[]> }).query = (text, params) => {
+    log.push(text);
+    if (/FROM buzzy_picture_looks WHERE user_id = \$1 AND asset_id IN \(/.test(text)) {
+      const [user, ...ids] = params as [string, ...number[]];
+      return Promise.resolve(ids.filter((id) => looks.has(`${user}:${id}`)).map((id) => ({ asset_id: String(id) })));
+    }
+    return Promise.resolve([]);
+  };
   return { sql, log, looks };
+}
+// A copy of a fake database whose read of which pictures are kept never answers.
+function stalledCheck(db: ReturnType<typeof fakeSql>) {
+  const run = db.sql as unknown as (s: TemplateStringsArray, ...v: unknown[]) => Promise<unknown[]>;
+  const sql = ((strings: TemplateStringsArray, ...vals: unknown[]) => run(strings, ...vals)) as unknown as Parameters<typeof V.lookAtPictures>[0];
+  (sql as unknown as { query: () => Promise<unknown[]> }).query = () => new Promise(() => {});
+  return sql;
 }
 const PNG = Buffer.from("89504e470d0a1a0a", "hex");
 
@@ -364,8 +379,7 @@ ok("a look still out when the budget ends is not waited for again on the next un
 ok("reading what is kept never holds the turn up (review 2: a slow database)", async () => {
   const db = fakeSql([71, 72].map((id) => ({ id, user: "w8", type: "image/png", body: PNG })));
   // The check of which pictures are known never answers.
-  const sql = ((strings: TemplateStringsArray, ...vals: unknown[]) =>
-    (/SELECT 1 AS one FROM buzzy_picture_looks/.test(strings.join("?")) ? new Promise(() => {}) : (db.sql as unknown as (s: TemplateStringsArray, ...v: unknown[]) => Promise<unknown[]>)(strings, ...vals))) as unknown as Parameters<typeof V.lookAtPictures>[0];
+  const sql = stalledCheck(db);
   const net = fakeFetch(() => ({ ...says("A kite."), delayMs: 50 }));
   const t0 = Date.now();
   const r = await V.lookAtPictures(sql, "w8", [{ id: 71, why: "on the board" }, { id: 72, why: "in view" }], { budgetMs: 1000, waitFor: () => true, fetchImpl: net.f });
@@ -446,18 +460,65 @@ ok("pictures that can't be looked at (gone, empty, not a picture) never keep the
   truthy(r.looks.some((l) => l.id === 157 && /red kite/.test(l.note)), JSON.stringify(r));
 });
 
-ok("a stalled check of one picture keeps what the others answered, and a tiny budget stays tiny (review 3)", async () => {
-  const looks = new Map([["w15:164", { note: "A known green tractor.", model: "vision-model" }]]);
+ok("which pictures are kept is one read for all of them, an earlier one included; stalled, a tiny budget stays tiny (reviews 3-4)", async () => {
+  const looks = new Map([["w15:164", { note: "A known green tractor from earlier.", model: "vision-model" }]]);
   const db = fakeSql([161, 162, 163, 164].map((id) => ({ id, user: "w15", type: "image/png", body: PNG })), looks);
-  const sql = ((strings: TemplateStringsArray, ...vals: unknown[]) =>
-    (/SELECT 1 AS one FROM buzzy_picture_looks/.test(strings.join("?")) && vals[1] === 161 ? new Promise(() => {}) : (db.sql as unknown as (s: TemplateStringsArray, ...v: unknown[]) => Promise<unknown[]>)(strings, ...vals))) as unknown as Parameters<typeof V.lookAtPictures>[0];
   const net = fakeFetch(() => ({ ...says("too late"), delayMs: 3000 }));
-  const picks = [161, 162, 163, 164].map((id) => ({ id, why: "on the board" as const }));
-  const r = await V.lookAtPictures(sql, "w15", picks, { budgetMs: 900, waitFor: () => true, fetchImpl: net.f });
+  const picks = [...[161, 162, 163].map((id) => ({ id, why: "on the board" as const })), { id: 164, why: "in the conversation" as const }];
+  const before = db.log.length;
+  const r = await V.lookAtPictures(db.sql, "w15", picks, { budgetMs: 900, waitFor: () => true, fetchImpl: net.f });
   truthy(r.looks.some((l) => l.id === 164 && /green tractor/.test(l.note)), JSON.stringify(r));
+  eq(db.log.slice(before).filter((q) => /asset_id IN \(/.test(q)).length, 1, "one read:");
+  truthy(!db.log.slice(before).some((q) => /SELECT 1 AS one/.test(q)), "never one per picture");
   const t0 = Date.now();
-  await V.lookAtPictures(sql, "w15", picks, { budgetMs: 25, waitFor: () => true, fetchImpl: net.f });
+  await V.lookAtPictures(stalledCheck(db), "w15", picks, { budgetMs: 25, waitFor: () => true, fetchImpl: net.f });
   truthy(Date.now() - t0 < 200, `a 25 ms budget took ${Date.now() - t0} ms`);
+});
+
+ok("on the real database the one read finds the kept ones, so they come back first (PGlite)", async () => {
+  const pg = new PGlite();
+  for (const f of ["0048_buzzy_assets.sql", "0071_buzzy_picture_looks.sql"]) await pg.exec(readFileSync(join(process.cwd(), "migrations", f), "utf8"));
+  for (const id of [191, 192, 193, 194]) {
+    await pg.query("INSERT INTO buzzy_assets (id, user_id, sha256, filename, rel_path, content_type, bytes, body) VALUES ($1, 'w18', $2, 'p.png', 'p.png', 'image/png', 8, $3)", [id, "sha" + id, new Uint8Array(PNG)]);
+  }
+  await pg.query("INSERT INTO buzzy_picture_looks (asset_id, user_id, note, model) VALUES (191, 'w18', 'A known purple umbrella.', 'vision-model')");
+  const sql = ((strings: TemplateStringsArray, ...values: unknown[]) => {
+    let text = "";
+    strings.forEach((part, i) => { text += part + (i < values.length ? "$" + (i + 1) : ""); });
+    return pg.query(text, values).then((r) => r.rows);
+  }) as unknown as Parameters<typeof V.lookAtPictures>[0];
+  (sql as unknown as { query: (t: string, v: unknown[]) => Promise<unknown[]> }).query = (t, v) => pg.query(t, v).then((r) => r.rows);
+  const rows = await (sql as unknown as { query: (t: string, v: unknown[]) => Promise<Array<{ asset_id: unknown }>> })
+    .query("SELECT asset_id FROM buzzy_picture_looks WHERE user_id = $1 AND asset_id IN ($2, $3)", ["w18", 191, 192]);
+  eq(rows.map((r) => Number(r.asset_id)), [191], "the read itself:");
+  // Three new pictures whose looks are slow, and the kept one joined into a step.
+  const net = fakeFetch(() => ({ ...says("too late"), delayMs: 3000 }));
+  const picks = [{ id: 191, why: "connected" as const }, ...[192, 193, 194].map((id) => ({ id, why: "on the board" as const }))];
+  const r = await V.lookAtPictures(sql, "w18", picks, { budgetMs: 800, waitFor: () => true, fetchImpl: net.f });
+  truthy(r.looks.some((l) => l.id === 191 && /purple umbrella/.test(l.note)), JSON.stringify(r));
+  eq(r.late, 3, "the three new ones late:");
+});
+
+ok("a database hiccup reading a picture is not held against the picture (review 4)", async () => {
+  const db = fakeSql([181].map((id) => ({ id, user: "w17", type: "image/png", body: PNG })));
+  const run = db.sql as unknown as (s: TemplateStringsArray, ...v: unknown[]) => Promise<unknown[]>;
+  let hiccups = 1;
+  const sql = ((strings: TemplateStringsArray, ...vals: unknown[]) =>
+    (/FROM buzzy_assets/.test(strings.join("?")) && hiccups-- > 0 ? Promise.reject(new Error("connection reset")) : run(strings, ...vals))) as unknown as Parameters<typeof V.lookAtPictures>[0];
+  const net = fakeFetch(() => ({ ...says("A yellow rubber duck."), delayMs: 10 }));
+  const r = await V.lookAtPictures(sql, "w17", [{ id: 181, why: "on the board" }], { budgetMs: 2000, waitFor: () => true, fetchImpl: net.f });
+  eq(r.failed.map((f) => f.code), ["unreadable"], "this turn:");
+  truthy(!V.lookFailedRecently("w17", 181), "not noted: the next turn tries it again, and waits for it");
+  truthy(V.waitsForLook("w17", { id: 181, why: "on the board" }, { aboutAPicture: false }), "waited for");
+});
+
+ok("the answer to their question is never what gets cut for room (review 4)", () => {
+  const first = { id: 1, label: "house", why: "pointed" as const, note: "A small house drawn in pencil with a door. ".repeat(15).trim(), answer: "It has three windows.", cached: false, model: "m" };
+  const second = { id: 2, label: "tree", why: "on the board" as const, note: "A tall green tree.", cached: true, model: "m" };
+  const text = V.picturesSeenBlock([first, second], { maxChars: 1000 });
+  truthy(text.length <= 1000, `${text.length} chars`);
+  truthy(/What you see, for their question: It has three windows\./.test(text), text);
+  truthy(/A tall green tree/.test(text), "the next picture still has its say");
 });
 
 ok("even a thrown value that can't be read is just that picture's failure (review 3)", async () => {
