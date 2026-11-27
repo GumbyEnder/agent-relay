@@ -219,6 +219,40 @@ export function isExplicitDocumentRequest(message: string): boolean {
 }
 
 /**
+ * Is this a request for a DIAGRAM — a flow, a sketch, a map?
+ *
+ * draw_board is the one maker that draws on the owner's own board, and it is offered
+ * only when this is true: a conversational answer must never turn into a diagram the
+ * person did not ask for (and an ordinary turn has no tool surface at all — a tool
+ * list is what turns streaming off).
+ *
+ * Two ways in, both disciplined:
+ *   - an unambiguous diagram noun anywhere in an order sentence ("flow chart",
+ *     "mind map", "wireframe", "user flow" …). These words have no other job.
+ *   - a making verb with a sketch-ish object in the SAME sentence ("sketch the
+ *     funnel", "map the journey", "draw the process"). "sketch" is the owner's own
+ *     verb for this, so it counts as both.
+ * Questions are dropped first, so "how do I draw a flow chart in Figma?" stays a
+ * question. "->", "→" or "=>" between names is a flow by itself, but only with a
+ * making verb ("what does visitors -> paid mean?" is a question, and dropped).
+ */
+export function isDiagramRequest(message: string): boolean {
+  const m = String(message || "");
+  if (!m.trim()) return false;
+  const STRONG = /\b(diagram|flow ?chart|flow ?diagram|org(?:anis|aniz)ation(?:al)? chart|org chart|mind ?map|site ?map|sitemap|user flow|wireframe|swim ?lane|journey map|process map|value stream)\b/i;
+  // A drawing verb takes a loose object ("sketch the process"); a making verb needs a
+  // thing that is actually drawn, so "make the process faster" is not a diagram.
+  const DRAW = /\b(sketch|draw|map|chart|lay out|plot|visuali[sz]e|diagram)\b/i;
+  const DRAWN = /\b(sketch|funnel|journey|pipeline|process|workflow|steps|flow|map|roadmap)\b/i;
+  const MAKE = /\b(make|create|build|produce|give me|show me|render)\b/i;
+  const MADE = /\b(funnel|journey|pipeline|workflow|flow ?chart|mind ?map|sketch|map)\b/i;
+  const ARROW = /(->|→|=>)/;
+  return orders(m).some(
+    (s) => STRONG.test(s) || (DRAW.test(s) && DRAWN.test(s)) || (MAKE.test(s) && MADE.test(s)) || (ARROW.test(s) && (DRAW.test(s) || MAKE.test(s))),
+  );
+}
+
+/**
  * Is this a request to MAKE A VIDEO — and which of the five recipes?
  *
  * The kit brief is explicit about why this exists: "Make me an infographic /

@@ -18,6 +18,7 @@
 
 import { CALCULATE_TOOL } from "./calc";
 import { RENDER_DOCUMENT_TOOL, RENDER_PRESENTATION_TOOL, RENDER_SHEET_TOOL } from "./artifact";
+import { DRAW_BOARD_TOOL } from "./drawBoard";
 import { LOOKUP_MARKET_RATE_TOOL, FETCH_WEBSITE_TOOL, SEARCH_KNOWLEDGE_TOOL } from "./info";
 import { SEARCH_INSPIRATION_TOOL } from "./inspirationSearch";
 import { WEB_SEARCH_TOOL } from "./search";
@@ -30,8 +31,11 @@ import { USE_BROWSER_TOOL } from "./browserRun";
  * always: every tool turn. draft: once the brief is complete or the owner asked for the file.
  * browser: a turn whose board has a browser node (the globe), or whose message asks BeeZilla to
  * do something on a website — never an ordinary chat turn (a tool list turns streaming off).
+ * diagram: the draft gate AND an explicit ask for a diagram/flow/map on this turn. It shares
+ * the deliverable gate but is narrower: a sketch is never drawn for a turn that did not ask
+ * for one, so an ordinary conversational turn can never reach it.
  */
-export type ToolGate = "always" | "draft" | "browser";
+export type ToolGate = "always" | "draft" | "browser" | "diagram";
 export type ToolCost = "free" | "metered";
 /** acts-on-websites: clicks and types on a website for the owner, who asked for it (and watches it). */
 export type ToolSideEffect = "read-only" | "render-to-memory" | "acts-on-websites";
@@ -202,6 +206,22 @@ export const TOOL_POLICIES: ToolPolicy[] = [
       "the deliverable is not ready yet — the brief still needs the four decisions, or the owner must ask for the draft.",
   },
   {
+    // A diagram the owner can change, drawn on their own board (drawBoard.ts). It costs
+    // nothing and leaves BeeZilla nothing to publish, but it WRITES over the project's
+    // board — so it is offered only when the owner asked for a diagram on this turn
+    // (never on a conversational turn) and only once the deliverable gate is open.
+    name: "draw_board",
+    schema: DRAW_BOARD_TOOL,
+    gate: "diagram",
+    offered: true,
+    timeoutMs: 20_000,
+    maxResultBytes: 4_000,
+    cost: "free",
+    sideEffects: "render-to-memory",
+    withheldReason:
+      "a sketch is offered only when the owner asks for a diagram, flow, funnel, map or sketch on a project.",
+  },
+  {
     name: "render_presentation",
     schema: RENDER_PRESENTATION_TOOL,
     gate: "draft",
@@ -239,11 +259,18 @@ export interface ToolContext {
   documentsOnly?: boolean;
   /** The board has a browser node, or the owner asked for something to be done on a website. */
   browser?: boolean;
+  /**
+   * The owner explicitly asked for a diagram / flow / map / sketch on this turn
+   * (intent.ts `isDiagramRequest`). Without it the sketch tool never appears — a
+   * conversational turn has no diagram in it, so it is never offered one.
+   */
+  diagram?: boolean;
 }
 
 function gateOpen(p: ToolPolicy, ctx: ToolContext): boolean {
   if (p.gate === "always") return true;
   if (p.gate === "browser") return !!ctx.browser;
+  if (p.gate === "diagram") return ctx.draftGateOpen && !!ctx.diagram;
   return ctx.draftGateOpen;
 }
 function allowed(p: ToolPolicy, ctx: ToolContext): boolean {
@@ -283,6 +310,11 @@ export function refusalFor(name: string, ctx: ToolContext): string | null {
   }
   if (policy.gate === "draft" && !ctx.draftGateOpen) {
     return `${name} is not available yet — ${policy.withheldReason ?? "the brief is not complete."}`;
+  }
+  if (policy.gate === "diagram") {
+    if (!ctx.draftGateOpen) return `${name} is not available yet — ${policy.withheldReason ?? "the brief is not complete."}`;
+    if (!ctx.diagram) return `${name} is not offered in this turn — ${policy.withheldReason ?? "nothing here asked for a diagram."}`;
+    return null;
   }
   if (policy.gate === "browser" && !ctx.browser) {
     return `${name} is not offered in this turn — ${policy.withheldReason ?? "there is no browser job."}`;

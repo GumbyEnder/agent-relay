@@ -89,7 +89,8 @@ import { readWebPage } from "./webpage";
 import { recordToolCall } from "./toolTelemetry";
 import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
-import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, isImageRequest, is3dRequest, videoAsk, producesDeliverable } from "./intent";
+import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, isImageRequest, is3dRequest, isDiagramRequest, videoAsk, producesDeliverable } from "./intent";
+import { drawBoard, loadJobBoard, saveJobBoard, type BoardDoc } from "./drawBoard";
 import { selfKnowledgeNote, wantsOpener, OPENER_NOTE } from "./self-knowledge";
 import { isPictureChange, isNewPictureAsk, changePrompt, pictureDataUrl, madeThingsSection, takeBoardPictures, boardReferencePrompt, type MadeThing } from "./pictureChange";
 import { appActionsNote, asksToOrchestrate, boardHasFlow, ORCHESTRATE_USER_LINE, planAppActions, setsUpBrowserJob, type AppAction } from "./pilot";
@@ -371,6 +372,7 @@ const TOOL_SKILL_NAMES: Record<string, string> = {
   read_web_page: "Read a web page",
   fetch_website: "Read a website",
   render_document: "Write the document",
+  draw_board: "Draw the sketch",
   generate_music: "Music maker",
   generate_image: "Picture maker",
   calculate: "Calculator",
@@ -1636,7 +1638,12 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // One mode: the gate used to wait for four discovered decisions (plan first, by
   // default). Now the rule's "go" on a request to make something real (a document,
   // a plan, a project) is itself the go-ahead, so the makers are on the table.
-  const draftGateOpen = wereAllFilled || requestedDraft || hasExistingDraft || goMakesSomething;
+  // A diagram is a deliverable the owner can edit, in their own words: "sketch the
+  // funnel" is a request to MAKE something, so it opens the same gate the renderers sit
+  // behind. The sketch tool itself stays narrower (toolRegistry gate "diagram"): it is
+  // offered only on a turn that actually asked for a diagram.
+  const diagramIntent = !wants3d && !wantsVideo && isDiagramRequest(message);
+  const draftGateOpen = wereAllFilled || requestedDraft || hasExistingDraft || goMakesSomething || diagramIntent;
   // The registry is the single source of truth for what may be called. No
   // hand-assembled arrays here: adding a tool must not require editing this
   // function, and a gated tool must never leak into the offered set.
@@ -1651,6 +1658,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     lockdown,
     documentsOnly: goMakesSomething && !(wereAllFilled || requestedDraft || hasExistingDraft),
     browser: browserTurn,
+    diagram: diagramIntent,
   };
   // Only a turn that can actually produce something gets a tool surface. An
   // always-on tool list forced every chat turn onto the buffered path (a
@@ -1665,6 +1673,10 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const explicitDocumentRequest = isExplicitDocumentRequest(message);
   const toolChoice = draftGateOpen && explicitDocumentRequest
     ? { type: "function", function: { name: "render_document" } }
+    // Asked for a sketch: force it, for the same reason (an optional tool is optional,
+    // and the owner asked for a changeable diagram, not prose about one).
+    : diagramIntent && draftGateOpen
+      ? { type: "function", function: { name: "draw_board" } }
     // Told to do the job now, in its browser: it does (a model treats an optional tool as optional).
     : browserTurn && (req.execute === true || browserCommand(message, browserNodes))
       ? { type: "function", function: { name: "use_browser" } }
@@ -1742,7 +1754,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // A brief left over from earlier must not push every reply onto the slow lane —
     // that is what made a two-second answer take 21 seconds. (One mode dropped the
     // old Work-mode clause: there is no mode any more.)
-    const toolTurnNeeded = explicitDocumentRequest || browserTurn;
+    const toolTurnNeeded = explicitDocumentRequest || browserTurn || diagramIntent;
     const useVoiceLane =
       surface === "voice" && !!req.speech && voiceAvailable() && !toolTurnNeeded;
     if (useVoiceLane) { spokeThisTurn = true; lane = "audio"; }
@@ -2037,6 +2049,57 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
                   "Say it is being made — do not describe it, do not say it is done, and do not call the tool again.",
               };
             }
+            if (tc.name === "draw_board") {
+              // The board belongs to a project: with no job there is nothing to come back
+              // to, so it says so rather than drawing into a void.
+              if (!jobId) {
+                return {
+                  message:
+                    "draw_board refused: there is no project in this conversation, so there is no board to draw on. " +
+                    "Say so in one sentence and offer to open a project first — do not claim a sketch was made.",
+                  errorCode: "no_job",
+                };
+              }
+              if (!isDiagramRequest(message)) {
+                return {
+                  message:
+                    "draw_board refused: this turn did not ask for a diagram. Draw only when the owner explicitly " +
+                    "asks for a diagram, flow, funnel, map or sketch; answer in words instead.",
+                  errorCode: "not_a_diagram",
+                };
+              }
+              const jobBoard = await loadJobBoard(sql, userId, jobId);
+              if (!jobBoard.found) {
+                return { message: "draw_board refused: that project is not this owner's, so nothing was drawn.", errorCode: "no_job" };
+              }
+              const made = drawBoard(jobBoard.board, content);
+              if (!made.ok || !made.board) {
+                return {
+                  message:
+                    `draw_board failed (${made.errorCode ?? "draw_failed"}): ${made.error}. ` +
+                    "Report that exact reason and do not claim a sketch exists.",
+                  errorCode: made.errorCode ?? "draw_failed",
+                };
+              }
+              const label = `Flow board — ${made.total?.nodes ?? 0} box${made.total?.nodes === 1 ? "" : "es"}, ${made.total?.edges ?? 0} connector${made.total?.edges === 1 ? "" : "s"}`;
+              const saved = await saveJobBoard(sql, userId, jobId, made.board as BoardDoc, label);
+              if (!saved) {
+                return { message: "draw_board failed: the board could not be saved to this project. Nothing was drawn.", errorCode: "save_failed" };
+              }
+              req.onFlow?.({
+                kind: "output", id: "out:board:" + jobId, title: "Sketch board",
+                parent: "tool:draw_board", state: "done", url: `/buzzy/sketch?job=${jobId}`,
+              });
+              const added = made.added ?? { nodes: 0, edges: 0 };
+              return {
+                message:
+                  `draw_board succeeded: added ${added.nodes} box(es) and ${added.edges} connector(s); the board now holds ` +
+                  `${made.total?.nodes ?? 0} boxes and ${made.total?.edges ?? 0} connectors. It is saved on this project and every ` +
+                  `mark is editable in Sketch (/buzzy/sketch?job=${jobId}). Tell the owner what you drew in one or two sentences, ` +
+                  "and that they can change it there — do not call the tool again for the same diagram.",
+                bytes: JSON.stringify(made.board).length,
+              };
+            }
             if (["render_document", "render_presentation", "render_sheet"].includes(tc.name)) {
               const result =
                 tc.name === "render_document" ? await renderDocument(content)
@@ -2133,7 +2196,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // not an answer, and it would have been saved as the deliverable. Ask once
     // for the prose; if it still comes back as an echo, fail the turn honestly
     // rather than storing junk in the owner's Library.
-    const TOOL_ECHO = /^\s*(read_web_page|web_search|fetch_website|lookup_market_rate|search_knowledge|search_inspiration|calculate|render_document|render_sheet|render_presentation|use_browser)\s*[:(]/i;
+    const TOOL_ECHO = /^\s*(read_web_page|web_search|fetch_website|lookup_market_rate|search_knowledge|search_inspiration|calculate|render_document|render_sheet|render_presentation|draw_board|use_browser)\s*[:(]/i;
     const URL_ONLY = /^\s*https?:\/\/\S+\s*$/i;
     if (reply.toolCalls.length === 0 && (TOOL_ECHO.test(reply.content) || URL_ONLY.test(reply.content))) {
       console.warn("[buzzy/chat] tool echo in reply — asking for prose once");

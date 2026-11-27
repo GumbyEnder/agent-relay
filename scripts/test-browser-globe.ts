@@ -322,7 +322,9 @@ section("One mode lets a browser job go");
       /if \(!orchestrating && !\(browserGo && !browserDoor\)\) \{\n\s+if \(oneState\) await memory\.remember\(STATE_KEY/.test(src));
   ok("the browser gate and one mode's documents-only gate are both on the turn",
     /const toolCtx = \{[^}]*\n\s+browser: browserTurn,\n/.test(src) && /const toolCtx = \{[^}]*\n\s+documentsOnly: goMakesSomething/.test(src) &&
-      /const toolTurnNeeded = explicitDocumentRequest \|\| browserTurn;/.test(src));
+      // CR-16 widened the set: a diagram turn also needs a tool surface, so the
+      // expression now names all three gates instead of two.
+      /const toolTurnNeeded = explicitDocumentRequest \|\| browserTurn \|\| diagramIntent;/.test(src));
   ok("documents-only never holds a browser job back", offeredToolNames({ draftGateOpen: true, browser: true, documentsOnly: true }).includes("use_browser") && refusalFor("use_browser", { draftGateOpen: true, browser: true, documentsOnly: true }) === null);
 }
 
