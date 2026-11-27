@@ -357,6 +357,38 @@ a.ob-item { text-decoration: none; }
   .talk-icon, .talk-extras .privacy-btn { height: 2.3rem; }
   .talk-icon { width: 2.3rem; }
 }
+/* ── A phone: the places row ends above the gear, never under it ────────
+   The settings gear (nav.js #bzDock) floats 16px in from the bottom-right and is
+   44px across: with its inset it owns the last 72px of the screen on a phone.
+   #bzHead is pinned under the chrome (top: --bz-chrome-h) and on a short phone —
+   or with a paper block open — it grows past the screen: its height at 360 was
+   515px against 411px of room, so the places row's last line ("Honey · Publish")
+   came to rest on the gear's corner, cut by the viewport edge and under the gear;
+   at 390x664 the row's bottom (622) sat inside the gear's band (604-648). No
+   label can move sideways out of that (the 50px reserve above already keeps the
+   row's right edge 15.6px clear of the gear's column), so the cap is vertical:
+   the header keeps itself to the room above the gear and scrolls inside that
+   room, which puts the row's last line 12px above the gear and makes it
+   reachable. It only bites when the header would otherwise overflow — at
+   360x800 (row ends 659, gear starts 740) and at 1280 nothing changes. The
+   board owns the screen while it is open, so html.ob-open is left alone. */
+@media (max-width: 640px) {
+  html.bz-has-head:not(.ob-open) .bz-head {
+    max-height: calc(100vh - var(--bz-chrome-h, 0px) - 72px);
+    max-height: calc(100svh - var(--bz-chrome-h, 0px) - 72px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  /* …and the block that ends in the places row holds the bottom of that room (sticky,
+     below the talk bar), so the row is on screen from the first paint instead of one
+     scroll away, and nothing of it is cut by the scrollport's edge. */
+  html.bz-has-head:not(.ob-open) .bz-head > .bz-browse {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    background: var(--bz-panel, #0A0A0A);
+  }
+}
 /* A phone: the paper clip and privacy take a short second line on the right, so the box
    keeps its width; the QR and copy buttons show their signs only (their names are in
    their tooltips), so the search box keeps room to type. */
