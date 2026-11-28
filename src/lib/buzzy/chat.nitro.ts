@@ -24,6 +24,8 @@
  *   GET  /api/buzzy/papers          — latest paper on the active company (?companyId, ?jobId)
  *                                     with no jobId: only a paper whose job is still open
  *   DELETE /api/buzzy/papers/:id    — take the paper off the landing (accepted lines stay)
+ *   GET  /api/buzzy/papers/:id/check — the inbound check: confirmed lines only, each with its place,
+ *                                     the gaps, and up to three questions. No arithmetic verdict.
  *   POST /api/buzzy/papers/:id/lines — confirm, correct, or drop one line
  *   POST /api/buzzy/money-check — compare a draft to the paper and the brief
  *   POST /api/buzzy/promise-check — mark a committing sentence; do not approve or send
@@ -88,6 +90,7 @@ import { fallbackCompanyName, readPublicWebsite, WEBSITE_SOURCE } from "./websit
 import { checkMoney, type MoneyBriefLine, type MoneyFact } from "./money";
 import { checkPromise } from "./promise";
 import { cleanFilename, deletePaper, latestPaper, paperForConversation, savePaper, updatePaperLine } from "./paper";
+import { inboundCheck } from "./inboundCheck";
 import { buildWeeklyDigest } from "./digest";
 import { rebuildCustomerMemory, memoryContextBlock, extractTemplateStructure, type CustomerMemoryEntry } from "./customer";
 import { buildExportBundle, deleteAccountData } from "./portability";
@@ -5709,6 +5712,32 @@ export default defineEventHandler(async (event) => {
       return { error: updated.error, code: updated.code };
     }
     return { ok: true, paper: updated.paper };
+  }
+
+  // ── GET /api/buzzy/papers/:id/check — the inbound check (CR-21) ────────
+  // Facts-only v0: the lines the owner CONFIRMED, each with the place it came
+  // from, what is still unconfirmed, and up to three questions. It reads no
+  // prose (buzzy_papers.body is never selected) and writes nothing — calling it
+  // twice leaves the account byte-identical. A locked PDF has no row at all
+  // (savePaper refuses it before the INSERT), so it is a 404 here like any other
+  // paper that is not on this account.
+  const paperCheck = path.match(/^\/api\/buzzy\/papers\/(pp_[a-z0-9]{8,32})\/check$/);
+  if (method === "GET" && paperCheck) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const checked = await inboundCheck(sql, user.id, paperCheck[1]);
+    if (!checked.ok) {
+      // no_confirmed_fact is a 200 on purpose: the paper is theirs and the answer
+      // is the sentence ("nothing is confirmed yet"), not a failed request. The
+      // body still says ok:false so no caller reads it as a report.
+      setResponseStatus(event, checked.status);
+      return { ok: false, error: checked.error, code: checked.code };
+    }
+    return { ok: true, check: checked.check };
   }
 
   // ── POST /api/buzzy/review — the SEPARATE risk-aware check (BZ-F014) ────

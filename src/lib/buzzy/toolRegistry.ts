@@ -17,6 +17,7 @@
  */
 
 import { CALCULATE_TOOL } from "./calc";
+import { CHECK_PAPER_TOOL } from "./inboundCheck";
 import { RENDER_DOCUMENT_TOOL, RENDER_PRESENTATION_TOOL, RENDER_SHEET_TOOL } from "./artifact";
 import { LOOKUP_MARKET_RATE_TOOL, FETCH_WEBSITE_TOOL, SEARCH_KNOWLEDGE_TOOL } from "./info";
 import { SEARCH_INSPIRATION_TOOL } from "./inspirationSearch";
@@ -30,8 +31,10 @@ import { USE_BROWSER_TOOL } from "./browserRun";
  * always: every tool turn. draft: once the brief is complete or the owner asked for the file.
  * browser: a turn whose board has a browser node (the globe), or whose message asks BeeZilla to
  * do something on a website — never an ordinary chat turn (a tool list turns streaming off).
+ * paper: only while a paper is on the job — the confirmed-lines check (CR-21). Read-only, free,
+ * no egress (so Lockdown does not withhold it: nothing leaves BeeZilla).
  */
-export type ToolGate = "always" | "draft" | "browser";
+export type ToolGate = "always" | "draft" | "browser" | "paper";
 export type ToolCost = "free" | "metered";
 /** acts-on-websites: clicks and types on a website for the owner, who asked for it (and watches it). */
 export type ToolSideEffect = "read-only" | "render-to-memory" | "acts-on-websites";
@@ -122,6 +125,19 @@ export const TOOL_POLICIES: ToolPolicy[] = [
     maxResultBytes: 2_000,
     cost: "free",
     sideEffects: "read-only",
+  },
+  {
+    // CR-21: the owner's confirmed lines, read back with the place each came from.
+    // Read-only and free, no egress; offered only while a paper is on the job.
+    name: "check_paper",
+    schema: CHECK_PAPER_TOOL,
+    gate: "paper",
+    offered: true,
+    timeoutMs: 4000,
+    maxResultBytes: 8_000,
+    cost: "free",
+    sideEffects: "read-only",
+    withheldReason: "there is no paper on this job — drop or paste one first.",
   },
   // ── Superseded: kept executable, never offered ───────────────────────
   {
@@ -239,11 +255,14 @@ export interface ToolContext {
   documentsOnly?: boolean;
   /** The board has a browser node, or the owner asked for something to be done on a website. */
   browser?: boolean;
+  /** A paper is on this job, so the confirmed-lines check (CR-21) is on the table. */
+  paper?: boolean;
 }
 
 function gateOpen(p: ToolPolicy, ctx: ToolContext): boolean {
   if (p.gate === "always") return true;
   if (p.gate === "browser") return !!ctx.browser;
+  if (p.gate === "paper") return !!ctx.paper;
   return ctx.draftGateOpen;
 }
 function allowed(p: ToolPolicy, ctx: ToolContext): boolean {
@@ -286,6 +305,9 @@ export function refusalFor(name: string, ctx: ToolContext): string | null {
   }
   if (policy.gate === "browser" && !ctx.browser) {
     return `${name} is not offered in this turn — ${policy.withheldReason ?? "there is no browser job."}`;
+  }
+  if (policy.gate === "paper" && !ctx.paper) {
+    return `${name} is not offered in this turn — ${policy.withheldReason ?? "there is no paper on this job."}`;
   }
   if (ctx.documentsOnly && policy.gate === "draft" && policy.egress) {
     return `${name} runs when the owner asks for it — this turn only writes documents.`;
