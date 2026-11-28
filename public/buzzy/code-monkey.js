@@ -169,7 +169,9 @@
   function loadProject(quiet) {
     var id = current;
     if (!quiet) body.innerHTML = '<p class="bzcm-empty">Loading…</p>';
-    return get(API + "?job=" + encodeURIComponent(id)).then(function (r) {
+    // The poll is a tick, not a read: moving a project along (opening a review, releasing the
+    // next step) is work, so it goes through POST and never rides on a GET.
+    return post({ action: "tick", jobId: id }).then(function (r) {
       if (id !== current) return;
       if (r.status === 401) return signedOut();
       if (r.status === 404) { body.innerHTML = '<p class="bzcm-empty">That project isn\'t yours or no longer exists.</p>'; return; }

@@ -16,11 +16,13 @@
  *   8. the budget is a ceiling: deliveries are counted once, new work waits at the limit,
  *      the owner's tap adds more and work goes on
  *   9. look on BeeZilla first: an earlier project of theirs is found and handed over
+ *  10. reading a project is a read: GET never opens a review, moves a mission or
+ *      counts spend — POST { action: "tick" } is the only door that moves it
  * Run: npx tsx scripts/test-code-monkey-flow.ts
  */
 import { durableBoard as board, ensureBoardReady } from "../src/lib/board-store.server";
 import { getSql } from "../src/lib/db";
-import { startCodeProject, readCodeProject, ownerActs, listCodeProjects } from "../src/lib/buzzy/codeMonkey.server";
+import { startCodeProject, advanceCodeProject, readCodeProject, ownerActs, listCodeProjects } from "../src/lib/buzzy/codeMonkey.server";
 
 process.env.BZ_CODE_HARNESS = "claude_code";
 process.env.BZ_CODE_REVIEW_HARNESS = "codex";
@@ -48,7 +50,7 @@ async function main() {
     return { missionId: s.missionId, reviewMissionId: s.reviewMissionId, agent: link.agentName, reviewer: link.reviewerName };
   }
   const states = async (jobId: string) => {
-    const v = await readCodeProject(sql, user, jobId);
+    const v = await advanceCodeProject(sql, user, jobId);
     return Object.fromEntries((v?.slices ?? []).map((s) => [s.key, s.state]));
   };
   const column = async (id: string | undefined) => (id ? (await board.getMission(id))?.column : undefined);
@@ -57,7 +59,7 @@ async function main() {
     const a = await ids(jobId, key);
     await board.claim(a.missionId, a.agent);
     await board.deliver(a.missionId, a.agent, `Built ${key}`, proof);
-    await readCodeProject(sql, user, jobId);
+    await advanceCodeProject(sql, user, jobId);
     const b = await ids(jobId, key);
     if (!b.reviewMissionId) return null;
     await board.claim(b.reviewMissionId, b.reviewer);
@@ -113,12 +115,12 @@ async function main() {
   await board.claim(g1.missionId, g1.agent);
   check("owner sees Working", (await states(g)).s1 === "working");
   await board.escalate(g1.missionId, g1.agent, "Should the hero be an animal or a kid?");
-  const withQ = await readCodeProject(sql, user, g);
+  const withQ = await advanceCodeProject(sql, user, g);
   const q = withQ?.slices.find((s) => s.key === "s1")?.question;
   check("an agent's question reaches the owner as Needs you", withQ?.slices[0].state === "needs-you" && /animal/.test(q?.text ?? ""));
   check("a stranger cannot answer it", !(await ownerActs(sql, stranger, g, { kind: "answer", callId: q?.callId ?? "", text: "x" })).ok);
   check("the owner answers", (await ownerActs(sql, user, g, { kind: "answer", callId: q?.callId ?? "", text: "An animal — a fox" })).ok);
-  check("the question is gone", !(await readCodeProject(sql, user, g))?.slices[0].question);
+  check("the question is gone", !(await advanceCodeProject(sql, user, g))?.slices[0].question);
 
   await board.claim(g1.missionId, g1.agent);
   await board.deliver(g1.missionId, g1.agent, "Fox hero and the forest scene. Try it: https://preview.example/game", ["https://preview.example/shot-1.png"]);
@@ -128,7 +130,7 @@ async function main() {
   check("the review asks for PASS/FAIL per check from the running app", /PASS or FAIL/.test((await board.getMission(g1r.reviewMissionId!))?.acceptance ?? "") && /real app/.test((await board.getMission(g1r.reviewMissionId!))?.constraints ?? ""));
   await board.claim(g1r.reviewMissionId!, g1r.reviewer);
   await board.deliver(g1r.reviewMissionId!, g1r.reviewer, "- PASS Tapping a hero shows the forest scene (iPad Safari)\nVERDICT PASS");
-  const afterReview = await readCodeProject(sql, user, g);
+  const afterReview = await advanceCodeProject(sql, user, g);
   check("reviewed play work with proof is Done", afterReview?.slices[0].state === "done" && afterReview.slices[0].reviewed === "pass", afterReview?.slices[0]);
   check("the next step is released once its 'after' is done", (await column((await ids(g, "s2")).missionId)) === "ready");
   check("proof links reach the owner", (afterReview?.slices[0].proof.links ?? []).includes("https://preview.example/game"));
@@ -137,11 +139,11 @@ async function main() {
   await board.claim(g2.missionId, g2.agent);
   await board.deliver(g2.missionId, g2.agent, "Choices wired up", []);
   const g2r = await ids(g, "s2");
-  await readCodeProject(sql, user, g);
+  await advanceCodeProject(sql, user, g);
   const g2r2 = await ids(g, "s2");
   await board.claim(g2r2.reviewMissionId!, g2r2.reviewer);
   await board.deliver(g2r2.reviewMissionId!, g2r2.reviewer, "- PASS choices branch\nVERDICT PASS");
-  await readCodeProject(sql, user, g);
+  await advanceCodeProject(sql, user, g);
   const gameBoard = (await sql<{ data: { codeMonkey: { projectId: string } } }>`SELECT data FROM buzzy_jobs WHERE id = ${g}`)[0].data.codeMonkey.projectId;
   const notes = ((await board.snapshot(gameBoard))?.events ?? []).filter((e) => e.missionId === g2.missionId);
   check("no proof attached → sent back to the builder, never Done", (await column(g2.missionId)) === "ready" && /without proof/i.test(JSON.stringify(notes)), { column: await column(g2.missionId), g2r });
@@ -179,7 +181,7 @@ async function main() {
   const m1 = await ids(mail.jobId, "s1");
   check("the brief holds the irreversible step", /do not run the irreversible step/.test((await board.getMission(m1.missionId))?.constraints ?? ""));
   await buildAndReview(mail.jobId, "s1", ["https://preview.example/email.png"]);
-  const ready = await readCodeProject(sql, user, mail.jobId);
+  const ready = await advanceCodeProject(sql, user, mail.jobId);
   check("after review, the owner is asked (never auto-sent)", ready?.slices[0].state === "needs-you" && ready.slices[0].ownerLooks === true, ready?.slices[0]);
   check("'go' from a stranger is refused", !(await ownerActs(sql, stranger, mail.jobId, { kind: "looks-right", sliceKey: "s1" })).ok);
   check("the owner says go ahead", (await ownerActs(sql, user, mail.jobId, { kind: "looks-right", sliceKey: "s1" })).ok);
@@ -205,10 +207,10 @@ async function main() {
   const l2brief = (await board.getMission((await ids(launch.jobId, "s2")).missionId))?.constraints ?? "";
   check("even authorized, the brief holds the step until the review passes", /do not run the irreversible step/.test(l2brief) && /once the independent review passes/.test(l2brief));
   await buildAndReview(launch.jobId, "s1", ["https://preview.example/colour"]);
-  await readCodeProject(sql, user, launch.jobId);
+  await advanceCodeProject(sql, user, launch.jobId);
   await buildAndReview(launch.jobId, "s2", ["https://preview.example/itch-ready"]);
   const l2 = await ids(launch.jobId, "s2");
-  const lview = await readCodeProject(sql, user, launch.jobId);
+  const lview = await advanceCodeProject(sql, user, launch.jobId);
   check("after its review it goes ahead by itself — the owner is not asked", (await column(l2.missionId)) === "ready" && lview?.slices[1].state !== "needs-you", lview?.slices[1]);
   await board.claim(l2.missionId, l2.agent);
   await board.deliver(l2.missionId, l2.agent, "Live at https://example.itch.io/colouring", ["https://example.itch.io/colouring"]);
@@ -226,17 +228,17 @@ async function main() {
   check("started without any launch authorization", two.ok && !two.project.launch);
   if (!two.ok) return;
   await buildAndReview(two.jobId, "s1", ["https://preview.example/site"]);
-  check("the first launch waits for the owner", (await readCodeProject(sql, user, two.jobId))?.slices[0].state === "needs-you");
+  check("the first launch waits for the owner", (await advanceCodeProject(sql, user, two.jobId))?.slices[0].state === "needs-you");
   await ownerActs(sql, user, two.jobId, { kind: "looks-right", sliceKey: "s1" });
   const t1 = await ids(two.jobId, "s1");
   await board.claim(t1.missionId, t1.agent);
   await board.deliver(t1.missionId, t1.agent, "Live", ["https://preview.example/live"]);
-  const policyView = await readCodeProject(sql, user, two.jobId);
+  const policyView = await advanceCodeProject(sql, user, two.jobId);
   check("the project now has a launch policy from the owner's go-ahead", policyView?.launch?.authorized === true && policyView.launch.source === "your go-ahead");
   await buildAndReview(two.jobId, "s2", ["https://preview.example/archive"]);
   const t2 = await ids(two.jobId, "s2");
-  await readCodeProject(sql, user, two.jobId);
-  check("the later launch goes ahead after review without asking again", (await column(t2.missionId)) === "ready" && (await readCodeProject(sql, user, two.jobId))?.slices[1].state !== "needs-you");
+  await advanceCodeProject(sql, user, two.jobId);
+  check("the later launch goes ahead after review without asking again", (await column(t2.missionId)) === "ready" && (await advanceCodeProject(sql, user, two.jobId))?.slices[1].state !== "needs-you");
 
   console.log("6. no reviewer from another company:");
   process.env.BZ_CODE_REVIEW_HARNESS = "claude_code";
@@ -252,7 +254,7 @@ async function main() {
   if (!solo.ok) return;
   const reviewed = await buildAndReview(solo.jobId, "s1", ["https://preview.example/dice"]);
   check("no same-company review is created", reviewed === null);
-  const sv = await readCodeProject(sql, user, solo.jobId);
+  const sv = await advanceCodeProject(sql, user, solo.jobId);
   check("it finishes, reported 'not independently reviewed' — never 'passed'", sv?.slices[0].state === "done" && sv.slices[0].reviewed === "not-available", sv?.slices[0]);
 
   check("a budget given as an answer is recorded as theirs", solo.project.budget?.source === "your answer" && solo.project.budget.capCents === 500, solo.project.budget);
@@ -290,27 +292,27 @@ async function main() {
   const k1 = await ids(t, "s1");
   await board.claim(k1.missionId, k1.agent);
   await board.deliver(k1.missionId, k1.agent, "Bill splitting works: https://preview.example/tip", ["https://preview.example/tip"], { estimatedUsd: 0.8 });
-  const near = await readCodeProject(sql, user, t);
+  const near = await advanceCodeProject(sql, user, t);
   check("a delivery's own cost is counted", near?.budget?.usedCents === 80, near?.budget);
   check("near the limit, new work waits: no review starts", near?.heldForBudget === true && near.budget?.verdict === "ask" && !(await ids(t, "s1")).reviewMissionId, near?.budget);
-  check("reading again counts nothing twice", (await readCodeProject(sql, user, t))?.budget?.usedCents === 80);
+  check("reading again counts nothing twice", (await advanceCodeProject(sql, user, t))?.budget?.usedCents === 80);
   check("a redo can't start past the limit", (await ownerActs(sql, user, t, { kind: "not-yet", sliceKey: "s1", text: "bigger numbers" })).error === "budget_used_up");
   check("a stranger can't raise the budget", !(await ownerActs(sql, stranger, t, { kind: "add-budget", dollars: 5 })).ok);
   check("a top-up below $1 is refused", (await ownerActs(sql, user, t, { kind: "add-budget", dollars: 0.5 })).error === "bad_amount");
   check("the owner adds $1", (await ownerActs(sql, user, t, { kind: "add-budget", dollars: 1 })).ok);
-  const resumed = await readCodeProject(sql, user, t);
+  const resumed = await advanceCodeProject(sql, user, t);
   const k1r = await ids(t, "s1");
   check("…and the held review starts", Boolean(k1r.reviewMissionId) && resumed?.heldForBudget === false && resumed.budget?.capCents === 200, resumed?.budget);
   await board.claim(k1r.reviewMissionId!, k1r.reviewer);
   await board.deliver(k1r.reviewMissionId!, k1r.reviewer, "- PASS each share shown for 6 people\nVERDICT PASS", [], { estimatedUsd: 1.5 });
-  const capped = await readCodeProject(sql, user, t);
+  const capped = await advanceCodeProject(sql, user, t);
   check("the reviewer's cost counts too", capped?.budget?.usedCents === 230 && capped.budget.line === "$2.30 of $2 used", capped?.budget);
   check("finished work is still accepted at the limit (that costs nothing)", capped?.slices[0].state === "done", capped?.slices[0]);
   check("…but the next step is not released", capped?.heldForBudget === true && capped.budget?.verdict === "refuse" && (await column((await ids(t, "s2")).missionId)) === "blocked");
   await ownerActs(sql, user, t, { kind: "add-budget", dollars: 5 });
-  await readCodeProject(sql, user, t);
+  await advanceCodeProject(sql, user, t);
   check("after the owner adds more, it goes on", (await column((await ids(t, "s2")).missionId)) === "ready");
-  const unpriced = await readCodeProject(sql, user, g);
+  const unpriced = await advanceCodeProject(sql, user, g);
   check("deliveries that report no cost count at the floor", (unpriced?.budget?.unreported ?? 0) >= 2 && (unpriced?.budget?.usedCents ?? 0) >= 100, unpriced?.budget);
 
   console.log("9. look on BeeZilla first:");
@@ -333,11 +335,46 @@ async function main() {
   check("…and handed to the agents in the first brief", /Your earlier project: "a bedtime adventure game"/.test((await board.getMission((await ids(again.jobId, "s1")).missionId))?.constraints ?? ""));
   check("another person's project is never searched", !again.project.found.some((f) => /lullaby/i.test(f.title)), again.project.found);
 
+  console.log("10. reading a project is a read — GET moves nothing:");
+  const rota = await startCodeProject(sql, user, {
+    words: "a chore chart for our flat, budget $5",
+    card: { making: "a chore chart", why: "nobody remembers whose turn it is", forWhom: "my flatmates", outcome: "we all see the rota", doneWhen: ["The chart shows this week's turns"], stakes: "play" },
+    slices: [
+      { key: "s1", title: "Show the rota", shows: "open the chart", doneWhen: ["The chart shows this week's turns"] },
+      { key: "s2", title: "Tick a chore off", shows: "tick a box", doneWhen: ["Ticking a box marks it done for the week"], after: ["s1"] },
+    ],
+  });
+  check("started", rota.ok, rota.ok ? undefined : rota.problems);
+  if (!rota.ok) return;
+  const ro = rota.jobId;
+  const ro1 = await ids(ro, "s1");
+  const roBoard = (await sql<{ data: { codeMonkey: { projectId: string } } }>`SELECT data FROM buzzy_jobs WHERE id = ${ro}`)[0].data.codeMonkey.projectId;
+  const linkOf = async () => (await sql<{ data: { codeMonkey: { slices: { key: string; reviewMissionId?: string }[]; spend?: { usedCents: number } } } }>`SELECT data FROM buzzy_jobs WHERE id = ${ro}`)[0].data.codeMonkey;
+  await board.claim(ro1.missionId, ro1.agent);
+  await board.deliver(ro1.missionId, ro1.agent, "The rota renders. https://preview.example/rota", ["https://preview.example/rota.png"]);
+  const snapBefore = (await board.snapshot(roBoard))!;
+  const linkBefore = await linkOf();
+  const columns = (snap: { missions: { id: string; column: string }[] }) => JSON.stringify(snap.missions.map((m) => [m.id, m.column]).sort());
+  const readOnce = await readCodeProject(sql, user, ro); // exactly what GET /api/buzzy/code?job= answers
+  const readTwice = await readCodeProject(sql, user, ro);
+  const snapAfter = (await board.snapshot(roBoard))!;
+  const linkAfter = await linkOf();
+  check("the read shows the delivered step as Checking", readOnce?.slices[0].state === "checking" && readTwice?.slices[0].state === "checking", readOnce?.slices[0]);
+  check("a read opens no review mission", !linkAfter.slices.find((x) => x.key === "s1")?.reviewMissionId, linkAfter.slices);
+  check("a read creates no mission at all", snapAfter.missions.length === snapBefore.missions.length, { before: snapBefore.missions.length, after: snapAfter.missions.length });
+  check("a read moves no mission", columns(snapAfter) === columns(snapBefore));
+  check("a read counts no spend", (linkAfter.spend?.usedCents ?? 0) === (linkBefore.spend?.usedCents ?? 0), { before: linkBefore.spend, after: linkAfter.spend });
+  check("…so the next step stays parked", (await column((await ids(ro, "s2")).missionId)) === "blocked");
+  // The tick is the only door that moves it — POST /api/buzzy/code { action: "tick" }.
+  const ticked = await advanceCodeProject(sql, user, ro);
+  check("the tick opens the review the read refused to open", Boolean((await ids(ro, "s1")).reviewMissionId));
+  check("…and the read then shows the same Checking step", ticked?.slices[0].state === "checking");
+
   console.log("listing and privacy:");
   const mine = await listCodeProjects(sql, user);
-  check("the owner's list has their nine projects", mine.length === 9, mine.length);
+  check("the owner's list has their ten projects", mine.length === 10, mine.length);
   check("a stranger sees only their own", (await listCodeProjects(sql, stranger)).map((p) => p.making).join() === "a bedtime dragon lullaby app");
-  check("a stranger can't read one", (await readCodeProject(sql, stranger, g)) === null);
+  check("a stranger can't read one", (await advanceCodeProject(sql, stranger, g)) === null);
   check("reading twice changes nothing more", JSON.stringify(await states(g)) === JSON.stringify(await states(g)));
 }
 

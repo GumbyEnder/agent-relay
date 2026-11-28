@@ -189,6 +189,13 @@ to attach). No role-play, no capital-letter rules.
 `/api/buzzy/code` (`codeMonkey.nitro.ts`, signed in):
 
 - `GET` → the person's coding projects; `GET ?job=<id>` → card, slices, proof, questions.
+  **A GET is a read only**: it never releases a slice, opens a review mission, moves a
+  mission or counts spend. An open workshop tab polls, and a review mission is spend — a
+  GET that advanced the project would make an idle tab cost money.
+- `POST {action:"tick", jobId}` — the poll. Moves the project along where its rules allow
+  (release the next step, open the independent review, accept per policy, count each
+  delivery once) and answers with the same project shape as `GET ?job=`. This is the only
+  door to that movement; `readCodeProject` answers GET, `advanceCodeProject` answers ticks.
 - `POST {action:"start", card, slices, words, budgetDollars}` — what the Talk tool calls.
 - `POST {action:"answer", jobId, callId, text}` — reply to an agent's question.
 - `POST {action:"looks-right"|"not-yet", jobId, slice, text?}` — the owner's look ("Go ahead"
@@ -219,9 +226,14 @@ the Talk box (Talk stays the one place to talk).
   held near the limit, redo refused, the owner's top-up resumes it, finished work still
   accepted, the next step held at the limit); looking first finds the owner's earlier
   project with its links and never another person's.
+- `scripts/test-code-monkey-get-readonly.ts` — the GET contract, through the real route
+  handler: with a delivery waiting on the board, `GET ?job=` twice opens no review mission,
+  creates no mission, moves nothing, counts no spend and leaves the next step parked;
+  `GET` (list) changes nothing; `POST {action:"tick"}` then opens that review; a stranger's
+  GET and tick are 404s.
 - `scripts/test-tool-registry.ts` — the `code` gate.
 
-Both new scripts run in CI through the `posttest:buzzy-jobs` hook.
+The code-monkey suites are named explicitly in `test:ci` (no `posttest:buzzy-jobs` hook).
 
 ## Not done yet
 

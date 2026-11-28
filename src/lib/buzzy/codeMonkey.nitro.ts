@@ -3,19 +3,22 @@
  *
  *   GET  /api/buzzy/code                → { projects: [...] } the person's coding projects
  *   GET  /api/buzzy/code?job=<id>       → one project: result card, slices, proof, questions
- *   POST /api/buzzy/code                → { action: "start", card, slices, words?, budgetDollars? }
+ *   POST /api/buzzy/code                → { action: "tick", jobId } the poll: moves the project
+ *                                         along and answers with the same project shape as GET
+ *                                       → { action: "start", card, slices, words?, budgetDollars? }
  *                                       → { action: "answer", jobId, callId, text }
  *                                       → { action: "looks-right", jobId, slice }
  *                                       → { action: "not-yet", jobId, slice, text }
  *                                       → { action: "add-budget", jobId, dollars }
  *
- * Reading a project also moves it along (releases slices, opens reviews, accepts
- * what the policy allows), so the page only ever polls GET.
+ * GET is a read and a read only: a poll must never release a slice, open a review
+ * mission (which is spend), move a mission or count money. Every bit of movement lives
+ * in POST { action: "tick" }, which is what the workshop page polls.
  */
 import { defineEventHandler, getMethod } from "h3";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getSql } from "@/lib/db";
-import { startCodeProject, readCodeProject, ownerActs, listCodeProjects } from "./codeMonkey.server";
+import { advanceCodeProject, startCodeProject, readCodeProject, ownerActs, listCodeProjects } from "./codeMonkey.server";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
@@ -60,6 +63,14 @@ export default defineEventHandler(async (event) => {
   const action = String(body.action || "");
   const jobId = String(body.jobId || "");
 
+  if (action === "tick") {
+    // The workshop's poll. Progression is a write — new review missions are spend — so it
+    // is reached here and never from GET.
+    if (!jobId) return json(400, { error: "jobId is required", code: "bad_request" });
+    const project = await advanceCodeProject(sql, user.id, jobId);
+    if (!project) return json(404, { error: "No such coding project", code: "not_found" });
+    return json(200, { ok: true, project });
+  }
   if (action === "start") {
     const r = await startCodeProject(sql, user.id, {
       card: body.card,

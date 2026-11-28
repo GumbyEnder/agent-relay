@@ -21,9 +21,10 @@
  * The owner's original words are kept as they were typed; the result card is a
  * summary that points back to them, never a replacement.
  *
- * Every state change here is idempotent: reading a project twice never
+ * Every state change here is idempotent: ticking a project twice never
  * releases, reviews or accepts anything twice. Other steps keep moving while one
- * waits for the owner.
+ * waits for the owner. Reading (readCodeProject) changes nothing at all; the tick
+ * (advanceCodeProject) is reached only through POST.
  *
  * Budget (owner, 2026-11-23, budget.ts): no project starts without an amount the owner
  * said themselves; each delivery's cost is counted once; once the budget is used up,
@@ -341,7 +342,7 @@ export async function startCodeProject(sql: Sql, userId: string, input: StartInp
     VALUES (${jobId}, ${userId}, 'code', ${card.making.slice(0, 120)}, 'working', ${input.companyId ?? null},
             ${JSON.stringify({ codeMonkey: link })}::jsonb, now())
   `;
-  const view = await readCodeProject(sql, userId, jobId);
+  const view = await advanceCodeProject(sql, userId, jobId);
   return { ok: true, jobId, project: view! };
 }
 
@@ -406,20 +407,49 @@ async function goAhead(s: LinkedSlice, note: string): Promise<boolean> {
   return back.ok;
 }
 
+/** The project's missions and where each one sits, as they are right now. Reads only. */
+async function projectRows(link: CodeMonkeyLink): Promise<{ rows: Map<string, MissionRow | null>; columnOf: Record<string, string> }> {
+  const rows = new Map<string, MissionRow | null>();
+  for (const s of link.slices) rows.set(s.key, await mission(s.missionId));
+  const columnOf = Object.fromEntries(link.slices.map((s) => [s.key, rows.get(s.key)?.column ?? "inbox"]));
+  return { rows, columnOf };
+}
+
 /**
- * Read a project, and move it along where the rules say it may move on its own:
- * release steps whose "after" steps are done, open independent reviews for
- * delivered work, accept what the policy lets through, and send authorized
- * points of no return back for their final step.
+ * Read a project and nothing else: what the person sees right now.
+ *
+ * This is what `GET /api/buzzy/code?job=` answers, and it must stay a read. It never
+ * releases a step, opens a review mission, moves a mission, counts spend or saves the
+ * link. An open workshop tab polls; a review mission is spend; so a GET that advanced
+ * the project would make an idle tab cost money. Movement lives in
+ * `advanceCodeProject`, whose only door is POST { action: "tick" }.
+ *
+ * The budget line shows the spend the last tick counted — nothing is counted here — and
+ * `heldForBudget` is only known to a tick (a read reports false; `budget.verdict` still
+ * says whether the ceiling is reached).
  */
 export async function readCodeProject(sql: Sql, userId: string, jobId: string): Promise<CodeProjectView | null> {
   const link = await loadLink(sql, userId, jobId);
   if (!link) return null;
+  const { rows, columnOf } = await projectRows(link);
+  return projectView(sql, jobId, link, rows, columnOf, budgetView(link.budget, link.spend ?? emptySpend()), false);
+}
+
+/**
+ * Move a project along where the rules say it may move on its own: release steps
+ * whose "after" steps are done, open independent reviews for delivered work, accept
+ * what the policy lets through, count each delivery once, and send authorized points
+ * of no return back for their final step.
+ *
+ * This is a write — it creates missions, moves missions and counts spend — so its only
+ * door is POST /api/buzzy/code { action: "tick" }. Never call it from a GET.
+ */
+export async function advanceCodeProject(sql: Sql, userId: string, jobId: string): Promise<CodeProjectView | null> {
+  const link = await loadLink(sql, userId, jobId);
+  if (!link) return null;
   let changed = false;
 
-  const rows = new Map<string, MissionRow | null>();
-  for (const s of link.slices) rows.set(s.key, await mission(s.missionId));
-  const columnOf = Object.fromEntries(link.slices.map((s) => [s.key, rows.get(s.key)?.column ?? "inbox"]));
+  const { rows, columnOf } = await projectRows(link);
 
   // 0. Count what finished work cost, each delivery once (builders' and reviewers'), and
   //    decide whether new work may start. Projects from before budgets have no ceiling.
@@ -536,7 +566,7 @@ export async function readCodeProject(sql: Sql, userId: string, jobId: string): 
   }
 
   // 2. Release steps whose prerequisites are done — including any finished just above,
-  //    so the next step starts in the same read instead of one poll later. Not while
+  //    so the next step starts in the same tick instead of one poll later. Not while
   //    the budget is used up: those steps wait for the owner to add more.
   for (const key of slicesToRelease(link.slices, columnOf)) {
     if (!mayStartWork) {
@@ -551,6 +581,22 @@ export async function readCodeProject(sql: Sql, userId: string, jobId: string): 
     }
   }
 
+  const view = await projectView(sql, jobId, link, rows, columnOf, budgetNow, heldForBudget);
+  const allDone = view.slices.length > 0 && view.counts.done === view.slices.length;
+  if (changed || allDone) await saveLink(sql, userId, jobId, link, allDone ? "done" : undefined);
+  return view;
+}
+
+/** Build the view the pages paint from missions already read; the open questions are its only extra read. */
+async function projectView(
+  sql: Sql,
+  jobId: string,
+  link: CodeMonkeyLink,
+  rows: Map<string, MissionRow | null>,
+  columnOf: Record<string, string>,
+  budgetNow: BudgetView | null,
+  heldForBudget: boolean,
+): Promise<CodeProjectView> {
   // 3. Questions the workers escalated.
   const board = await boardOps.snapshot(link.projectId);
   const openCalls = (board?.calls ?? []).filter((c) => !c.resolvedAt);
@@ -588,9 +634,6 @@ export async function readCodeProject(sql: Sql, userId: string, jobId: string): 
 
   const counts = { waiting: 0, working: 0, "needs-you": 0, checking: 0, done: 0 } as Record<SliceState, number>;
   for (const v of views) counts[v.state] += 1;
-  const allDone = views.length > 0 && counts.done === views.length;
-  if (changed || allDone) await saveLink(sql, userId, jobId, link, allDone ? "done" : undefined);
-
   return {
     jobId,
     card: link.card,
