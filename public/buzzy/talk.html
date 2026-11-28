@@ -3230,6 +3230,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
               : m.videoJobId ? ' data-video="' + String(m.videoJobId).replace(/"/g, "") + '"' : "") +
             '>' + String(m.progress).replace(/</g, "&lt;") + "</div>";
         }
+        if (m.codeProject && m.codeProject.jobId) {
+          bubble += window.BeeZillaCodeMonkey
+            ? window.BeeZillaCodeMonkey.cardHtml(m.codeProject)
+            : '<a class="bz-what" href="#code=' + encodeURIComponent(m.codeProject.jobId) + '">Open Code Monkey\'s workshop</a>';
+        }
         if (m.timings) bubble += renderWhatHappened(m);
         // One mode (oneMode.ts): the quick choice, or a question's suggested answer.
         // Only under the newest reply: once they answer, the buttons have done their job.
@@ -7619,6 +7624,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           // why a made image "did not appear" (production, 2026-11-17).
           asset: data.audio || data.asset || data.image || firstImageArtifact(data.artifacts) || null,
           artifacts: data.artifacts || null,
+          // A coding project Code Monkey started this turn (code-monkey.js opens it).
+          codeProject: data.codeProject || null,
           timings: data.timings || null,
           tools: data.tools || null,
           // Buttons under this reply: the one quick choice, or a suggested answer.

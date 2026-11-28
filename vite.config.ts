@@ -436,6 +436,16 @@ export default defineConfig(({ command }) => ({
                 handler: "./src/lib/auth-api.nitro.ts",
               },
               {
+                // Code Monkey's workshop: coding projects, their slices and proof
+                // (src/lib/buzzy/codeMonkey.server.ts).
+                route: "/api/buzzy/code",
+                handler: "./src/lib/buzzy/codeMonkey.nitro.ts",
+              },
+              {
+                route: "/api/buzzy/code/**",
+                handler: "./src/lib/buzzy/codeMonkey.nitro.ts",
+              },
+              {
                 // What this deployment can actually do, answered from the same
                 // registry the chat loop uses.
                 route: "/api/buzzy/capabilities",

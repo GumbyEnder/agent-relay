@@ -24,17 +24,22 @@ import { WEB_SEARCH_TOOL } from "./search";
 import { READ_WEB_PAGE_TOOL } from "./webpage";
 import { GENERATE_MUSIC_TOOL } from "./music";
 import { GENERATE_VIDEO_TOOL } from "./video";
+import { START_CODE_PROJECT_TOOL } from "./codeMonkey";
 import { USE_BROWSER_TOOL } from "./browserRun";
 
 /**
  * always: every tool turn. draft: once the brief is complete or the owner asked for the file.
  * browser: a turn whose board has a browser node (the globe), or whose message asks BeeZilla to
  * do something on a website — never an ordinary chat turn (a tool list turns streaming off).
+ * code: a turn that asks for software to be made or changed (Code Monkey's workshop).
  */
-export type ToolGate = "always" | "draft" | "browser";
+export type ToolGate = "always" | "draft" | "browser" | "code";
 export type ToolCost = "free" | "metered";
-/** acts-on-websites: clicks and types on a website for the owner, who asked for it (and watches it). */
-export type ToolSideEffect = "read-only" | "render-to-memory" | "acts-on-websites";
+/**
+ * acts-on-websites: clicks and types on a website for the owner, who asked for it (and watches it).
+ * starts-work: hands a job to agents (Code Monkey's board); it can be stopped, so it is a two-way door.
+ */
+export type ToolSideEffect = "read-only" | "render-to-memory" | "acts-on-websites" | "starts-work";
 
 export interface ToolPolicy {
   name: string;
@@ -223,6 +228,21 @@ export const TOOL_POLICIES: ToolPolicy[] = [
     sideEffects: "render-to-memory",
     withheldReason: "the deliverable is not ready yet — same gate as the document.",
   },
+  {
+    // Code Monkey's workshop (codeMonkey.server.ts): turns a coding request into
+    // slices that agents build on a board, with proof. Egress: the agents that
+    // build it talk to their own model providers, so Lockdown withholds it.
+    name: "start_code_project",
+    egress: true,
+    schema: START_CODE_PROJECT_TOOL,
+    gate: "code",
+    offered: true,
+    timeoutMs: 20_000,
+    maxResultBytes: 4_000,
+    cost: "metered",
+    sideEffects: "starts-work",
+    withheldReason: "this turn isn't asking for software to be made or changed.",
+  },
 ];
 
 export interface ToolContext {
@@ -230,6 +250,8 @@ export interface ToolContext {
   draftGateOpen: boolean;
   /** The owner chose Lockdown: nothing that leaves BeeZilla is offered. */
   lockdown?: boolean;
+  /** This turn asks for software to be made or changed (codeMonkey.isCodeTurn). */
+  codeRequest?: boolean;
   /**
    * The gate is open only because one mode decided to just do the work (oneMode.ts),
    * not because anyone asked for a file: the document makers are offered, the
@@ -243,9 +265,11 @@ export interface ToolContext {
 
 function gateOpen(p: ToolPolicy, ctx: ToolContext): boolean {
   if (p.gate === "always") return true;
+  if (p.gate === "code") return ctx.codeRequest === true;
   if (p.gate === "browser") return !!ctx.browser;
   return ctx.draftGateOpen;
 }
+
 function allowed(p: ToolPolicy, ctx: ToolContext): boolean {
   return (
     p.offered &&
@@ -280,6 +304,9 @@ export function refusalFor(name: string, ctx: ToolContext): string | null {
   }
   if (ctx.lockdown && policy.egress) {
     return `${name} is off in Lockdown — nothing leaves BeeZilla in that mode. The privacy control on the Talk bar switches it back.`;
+  }
+  if (policy.gate === "code" && !ctx.codeRequest) {
+    return `${name} is not available on this turn — ${policy.withheldReason}`;
   }
   if (policy.gate === "draft" && !ctx.draftGateOpen) {
     return `${name} is not available yet — ${policy.withheldReason ?? "the brief is not complete."}`;
