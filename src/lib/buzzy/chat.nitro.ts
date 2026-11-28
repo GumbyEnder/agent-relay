@@ -3550,6 +3550,13 @@ export default defineEventHandler(async (event) => {
         return { error: "That company isn't on your account.", code: "bad_company" };
       }
     }
+    // The row is shared by several surfaces (Library's interview flow, the Sketch
+    // canvas, the Studio plan, the research sources, the filed document, the
+    // approval). A POST carries only the caller's own keys, so a thin client must
+    // never delete a key it did not write: merge into what the row already holds
+    // instead of replacing the blob. This is the same jsonb || shape PATCH and
+    // /api/buzzy/art already use — a caller that means to blank a key sends it
+    // explicitly as null (CR-20).
     const dataObj: Record<string, unknown> =
       body.data && typeof body.data === "object" && !Array.isArray(body.data)
         ? { ...(body.data as Record<string, unknown>) }
@@ -3575,7 +3582,7 @@ export default defineEventHandler(async (event) => {
             title = EXCLUDED.title,
             status = EXCLUDED.status,
             company_id = EXCLUDED.company_id,
-            data = EXCLUDED.data,
+            data = COALESCE(buzzy_jobs.data, '{}'::jsonb) || EXCLUDED.data,
             updated_at = now()
           WHERE buzzy_jobs.user_id = EXCLUDED.user_id
           RETURNING id
@@ -3587,7 +3594,7 @@ export default defineEventHandler(async (event) => {
             template = EXCLUDED.template,
             title = EXCLUDED.title,
             status = EXCLUDED.status,
-            data = EXCLUDED.data,
+            data = COALESCE(buzzy_jobs.data, '{}'::jsonb) || EXCLUDED.data,
             updated_at = now()
           WHERE buzzy_jobs.user_id = EXCLUDED.user_id
           RETURNING id

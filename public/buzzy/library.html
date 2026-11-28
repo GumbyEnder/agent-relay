@@ -698,9 +698,40 @@
         version: 0,
         approved: false,
         pause: null,
-        board: { Waiting: [], Working: [], "Needs you": [], Done: [] },
+        // The interview's four-column progress. It has its OWN key: `data.board`
+        // on a job row is the Sketch canvas (w/h/strokes/images/raster), written
+        // by /api/buzzy/art. Two surfaces sharing one key meant a Library save
+        // posted this shape over someone's drawing (CR-20).
+        flow: { Waiting: [], Working: [], "Needs you": [], Done: [] },
         events: [],
       };
+    }
+
+    var FLOW_COLUMNS = ["Waiting", "Working", "Needs you", "Done"];
+
+    // Library's four columns, and only those. A value that looks like a canvas is
+    // refused outright, so a job whose data.board is a drawing can never be read
+    // as an empty flow board (and never rendered as one).
+    function flowBoard(raw) {
+      var src = raw && typeof raw === "object" && !Array.isArray(raw) &&
+        !raw.strokes && !raw.images && !raw.raster ? raw : null;
+      var out = {};
+      FLOW_COLUMNS.forEach(function (name) {
+        var chips = src && Array.isArray(src[name]) ? src[name] : [];
+        out[name] = chips.filter(function (c) { return c && c.title; })
+          .map(function (c) { return { title: String(c.title) }; });
+      });
+      return out;
+    }
+
+    // Older catalogs (and rows written before `flow` existed) kept the same
+    // four columns under `board`. Adopt that shape once, on load, and leave the
+    // sketch canvas where it is.
+    function ensureFlowBoard(j) {
+      if (!j || typeof j !== "object") return j;
+      if (!j.flow || typeof j.flow !== "object") j.flow = flowBoard(j.board);
+      else j.flow = flowBoard(j.flow);
+      return j;
     }
 
     function jobComplete(j) {
@@ -712,7 +743,7 @@
       if (!j) return false;
       if (j.status === "Done") return true;
       if (j.screen === "result") return true;
-      if (j.board && Array.isArray(j.board.Done) && j.board.Done.length >= 4) return true;
+      if (j.flow && Array.isArray(j.flow.Done) && j.flow.Done.length >= 4) return true;
       return false;
     }
 
@@ -773,6 +804,39 @@
       }, 400);
     }
 
+    // ── What Library may write ────────────────────────────────────────────
+    // One job row is shared by four surfaces, and `data` is the whole row. A
+    // Library save used to POST the local snapshot as `data`, so every key only
+    // another surface had written — the Sketch canvas and its sources, the
+    // Studio plan, the filed document, the approval — was deleted whenever the
+    // local copy was thinner than the row (a failed list read, or an honest
+    // empty one, plus one click; CR-20). This list is the interview flow and
+    // nothing else: the server merges it into the row it already has.
+    var LIBRARY_FIELDS = ["problem", "messages", "screen", "q", "answers", "skipped",
+      "version", "pause", "events", "draftText", "template", "flow",
+      "createdAt", "updatedAt"];
+
+    function libraryPayload(j) {
+      var data = {};
+      LIBRARY_FIELDS.forEach(function (k) {
+        // null/undefined means "this page has nothing to say about it", never
+        // "blank it" — a stale copy must not erase a value it never saw.
+        if (j[k] !== undefined && j[k] !== null) data[k] = j[k];
+      });
+      var body = {
+        id: j.id,
+        template: j.template || null,
+        title: jobTitle(j),
+        status: jobStatus(j),
+        data: data
+      };
+      // Only a real company id is sent. An absent one means this device has not
+      // filed the job yet, and the server keeps the column it already has —
+      // sending null unfiled rows another surface had filed.
+      if (typeof j.companyId === "string" && j.companyId) body.companyId = j.companyId;
+      return body;
+    }
+
     // Persist one job, including which company it belongs to. Null companyId
     // means the owner has not filed it yet.
     function pushJob(j) {
@@ -781,14 +845,7 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({
-          id: j.id,
-          template: j.template || null,
-          title: jobTitle(j),
-          status: jobStatus(j),
-          companyId: j.companyId || null,
-          data: j
-        })
+        body: JSON.stringify(libraryPayload(j))
       }).catch(function () { /* offline or signed out */ });
     }
 
@@ -873,6 +930,10 @@
         var c = Date.parse(s.createdAt);
         if (!isNaN(c)) job.createdAt = c;
       }
+      // Library's flow board is `flow`. Rows written before that key existed
+      // kept the same four columns in `board`, and a Sketch row keeps its canvas
+      // there — flowBoard() adopts the first shape and refuses the second.
+      job.flow = flowBoard(data.flow || data.board);
       return job;
     }
 
@@ -884,10 +945,16 @@
       var prevScreen = state.screen;
       var prevId = state.id;
       fetch("/api/buzzy/jobs", { headers: { Accept: "application/json" }, credentials: "same-origin" })
-        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (r) {
+          // A failed read is not an empty account. Only an ok answer that
+          // carries a jobs array may open the write gate; a 401, a 500 or a
+          // dropped request leaves this page read-only until a later load
+          // succeeds (CR-20).
+          return r.ok ? r.json() : null;
+        })
         .then(function (d) {
+          if (!d || !Array.isArray(d.jobs)) return; // nothing was read — gate stays shut
           serverMerged = true;
-          if (!d || !Array.isArray(d.jobs)) return;
           var serverJobs = [];
           d.jobs.forEach(function (s) {
             var job = normalizeServerJob(s);
@@ -902,6 +969,7 @@
               (j.problem || (j.messages && j.messages.length));
           });
           catalog.jobs = serverJobs.concat(pending);
+          catalog.jobs.forEach(ensureFlowBoard);
           catalog.jobs.sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
           var cur = catalog.jobs.find(function (j) { return j.id === prevId; });
           if (cur) state = cur;
@@ -913,7 +981,7 @@
           if (state.screen === "docs") goDocs();
           else if (state.screen === "jobs") goJobs();
         })
-        .catch(function () { serverMerged = true; });
+        .catch(function () { /* read failed — the gate stays shut (CR-20) */ });
     }
 
     function loadState() {
@@ -923,6 +991,7 @@
           const saved = JSON.parse(raw);
           if (saved && Array.isArray(saved.jobs)) {
             catalog.jobs = saved.jobs;
+            catalog.jobs.forEach(ensureFlowBoard);
             catalog.hideCompleted = saved.hideCompleted !== false;
             catalog.userId = saved.userId || catalog.userId;
             catalog.currentId = saved.currentId || (saved.jobs[0] && saved.jobs[0].id) || null;
@@ -942,6 +1011,7 @@
           if (old && typeof old === "object") {
             state = Object.assign(emptyJob("job_legacy"), old);
             state.id = "job_legacy";
+            ensureFlowBoard(state);
             catalog.jobs = [state];
             catalog.currentId = state.id;
             state.screen = "jobs";
@@ -1866,7 +1936,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function approve() {
       state.events.push({ type: "approval", gate: "first_ticket_cut", version: "v" + state.version, at: Date.now(), missions: [] });
       state.approved = true;
-      state.board = {
+      state.flow = {
         Waiting: [{ title: STEPS[1].title }, { title: STEPS[2].title }, { title: STEPS[3].title }],
         Working: [{ title: STEPS[0].title }],
         "Needs you": [],
@@ -1904,14 +1974,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function move(from, to, title) {
-      state.board[from] = state.board[from].filter((c) => c.title !== title);
-      state.board[to].push({ title: title });
+      state.flow = flowBoard(state.flow);
+      state.flow[from] = state.flow[from].filter((c) => c.title !== title);
+      state.flow[to].push({ title: title });
     }
 
     function goBoard() {
       setPhase("Watch the work move");
       const cols = ["Waiting", "Working", "Needs you", "Done"].map((name) => {
-        const chips = (state.board[name] || []).map((c) => "<div class='chip" + (name === "Working" ? " working" : "") + "'>" + c.title + "</div>").join("") || "<p class='muted'>None</p>";
+        const chips = (state.flow[name] || []).map((c) => "<div class='chip" + (name === "Working" ? " working" : "") + "'>" + c.title + "</div>").join("") || "<p class='muted'>None</p>";
         return "<div class='col'><h3>" + name + "</h3>" + chips + "</div>";
       }).join("");
       document.getElementById("app").innerHTML =
@@ -1942,7 +2013,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         render();
       };
       document.getElementById("back").onclick = () => {
-        state.screen = state.approved ? (state.board.Done.length >= 4 ? "result" : "board") : (state.q > 0 && state.q < 8 ? "ask" : "intro");
+        state.screen = state.approved ? ((state.flow && state.flow.Done.length >= 4) ? "result" : "board") : (state.q > 0 && state.q < 8 ? "ask" : "intro");
         if (state.version && !state.approved) state.screen = "draft";
         render();
       };
